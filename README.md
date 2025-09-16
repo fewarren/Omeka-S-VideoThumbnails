@@ -139,35 +139,6 @@ sudo dnf install ffmpeg ghostscript poppler-utils
 
    See general end user documentation for [installing a module] and follow the configuration instructions below.
 
-### Video Thumbnail Configuration
-
-For video thumbnail functionality to work properly, you need to configure the thumbnailer override:
-
-#### Required: Local Configuration Override
-
-Edit `/path/to/omeka-s/config/local.config.php` and add the following configuration:
-
-```php
-<?php
-return [
-    // ... your existing configuration ...
-
-    'service_manager' => [
-        'aliases' => [
-            'Omeka\File\Store' => 'Omeka\File\Store\Local',
-            // CRITICAL: This line enables video thumbnail generation
-            'Omeka\File\Thumbnailer' => 'VideoThumbnails\File\Thumbnailer\VideoAwareThumbnailer',
-        ],
-    ],
-
-    // ... rest of your configuration ...
-];
-```
-
-⚠️ **Important**: This configuration override is **required** for video thumbnails to work. Without it, videos will continue to show black thumbnails.
-
-## Environment-Specific Configuration
-
 Following Omeka S best practices, all environment-specific settings should be configured in `local.config.php` rather than hardcoded in module files. This ensures your installation is portable across different environments (development, staging, production).
 
 ### Required Configuration in local.config.php
@@ -212,12 +183,6 @@ return [
             'base_uri' => 'http://localhost/omeka-s/files',
         ],
     ],
-    'service_manager' => [
-        'aliases' => [
-            'Omeka\File\Store' => 'Omeka\File\Store\Local',
-            'Omeka\File\Thumbnailer' => 'VideoThumbnails\File\Thumbnailer\VideoAwareThumbnailer',
-        ],
-    ],
 ];
 ```
 
@@ -232,12 +197,6 @@ return [
             'base_uri' => 'https://your-production-domain.com/omeka-s/files',
         ],
     ],
-    'service_manager' => [
-        'aliases' => [
-            'Omeka\File\Store' => 'Omeka\File\Store\Local',
-            'Omeka\File\Thumbnailer' => 'VideoThumbnails\File\Thumbnailer\VideoAwareThumbnailer',
-        ],
-    ],
 ];
 ```
 
@@ -250,12 +209,6 @@ return [
         'local' => [
             'base_path' => getenv('OMEKA_FILES_PATH') ?: '/var/www/html/files',
             'base_uri' => (getenv('OMEKA_BASE_URL') ?: 'http://localhost:8080') . '/files',
-        ],
-    ],
-    'service_manager' => [
-        'aliases' => [
-            'Omeka\File\Store' => 'Omeka\File\Store\Local',
-            'Omeka\File\Thumbnailer' => 'VideoThumbnails\File\Thumbnailer\VideoAwareThumbnailer',
         ],
     ],
 ];
@@ -308,30 +261,19 @@ For production deployments, follow these guidelines:
 - ✅ **Version control**: Exclude `local.config.php` from version control
 - ✅ **Documentation**: Document required environment variables for your team
 
-#### 2. Service Configuration
-```php
-// Required in local.config.php for production
-'service_manager' => [
-    'aliases' => [
-        'Omeka\File\Store' => 'Omeka\File\Store\Local',
-        'Omeka\File\Thumbnailer' => 'VideoThumbnails\File\Thumbnailer\VideoAwareThumbnailer',
-    ],
-],
-```
-
-#### 3. Performance Optimization
+#### 2. Performance Optimization
 - ✅ **Disable debug logging**: Turn off debug logging in production
 - ✅ **PHP OPcache**: Enable PHP OPcache for better performance
 - ✅ **File permissions**: Ensure proper file ownership and permissions
 - ✅ **Background jobs**: Use proper job queue management for large video processing
 
-#### 4. Security Considerations
+#### 3. Security Considerations
 - ✅ **File permissions**: Restrict access to configuration files
 - ✅ **Download prevention**: Enable video download prevention if needed
 - ✅ **Path validation**: Ensure FFmpeg paths are secure and validated
 - ✅ **Error handling**: Proper error handling without exposing system information
 
-#### 5. Monitoring and Maintenance
+#### 4. Monitoring and Maintenance
 - ✅ **Log monitoring**: Set up log monitoring for errors and issues
 - ✅ **Job monitoring**: Monitor background job processing
 - ✅ **Disk space**: Monitor file storage for thumbnail generation
