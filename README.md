@@ -1,6 +1,7 @@
 Video Thumbnail (module for Omeka S)
 ===============================================
 
+
 [Video Thumbnails] is a module for [Omeka S] that is based on the Derivative Media Optimizer module which optimizes files for the web:
 it creates derivative files from audio and video files adapted for mobile
 or desktop, streamable, sized for slow or big connection, and cross-browser
@@ -51,12 +52,22 @@ This enhanced version includes **advanced video thumbnail generation** capabilit
 2. **Install the module** in Omeka S admin interface
 3. **Edit** `/path/to/omeka-s/config/local.config.php` and add:
    ```php
-   'service_manager' => [
-       'aliases' => [
-           'Omeka\File\Store' => 'Omeka\File\Store\Local',
-           'Omeka\File\Thumbnailer' => 'VideoThumbnails\File\Thumbnailer\VideoAwareThumbnailer',
-       ],
-   ],
+   'thumbnails' => [
+        'thumbnailer' => 'Omeka\File\Thumbnailer\ImageMagick',
+        'types' => [
+            'large' => ['constraint' => 800],
+            'medium' => ['constraint' => 200],
+            'square' => ['constraint' => 200],
+        ],
+        'thumbnailer_options' => [
+            'imagemagick_dir' => '/usr/bin',
+            'ffmpeg' => [
+                'command' => 'ffmpeg',
+                'args' => '-ss 120 -i %source% -vframes 1 -f image2 %destination%'
+            ],
+            /*'page' => 1200, */
+        ],
+     ],
    ```
 4. **Restart Apache**: `sudo systemctl restart apache2`
 5. **Upload a video** - thumbnail will be generated automatically! 🎉
