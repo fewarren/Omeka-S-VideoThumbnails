@@ -1,10 +1,6 @@
 Video Thumbnail (module for Omeka S)
 ===============================================
 
-> __New versions of this module and support for Omeka S version 3.0 and above
-> are available on [GitLab], which seems to respect users and privacy better
-> than the previous repository.__
-
 [Video Thumbnails] is a module for [Omeka S] that is based on the Derivative Media Optimizer module which optimizes files for the web:
 it creates derivative files from audio and video files adapted for mobile
 or desktop, streamable, sized for slow or big connection, and cross-browser
