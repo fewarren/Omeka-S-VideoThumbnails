@@ -1,0 +1,727 @@
+<?php
+/**
+ * @var \Laminas\View\Renderer\PhpRenderer $this
+ * @var \Omeka\Api\Representation\SitePageBlockRepresentation $block
+ * @var \Omeka\Api\Representation\SiteRepresentation $site
+ * @var array $data
+ * @var \DerivativeMedia\Service\VideoThumbnailService $videoThumbnailService
+ */
+
+$escape = $this->plugin('escapeHtml');
+$translate = $this->plugin('translate');
+
+// AGGRESSIVE VARIABLE ISOLATION: Clear any potentially contaminated variables
+unset($heading, $blockHeading, $caption);
+
+// DEFENSIVE PROGRAMMING: Ensure we have clean block-specific data
+$blockData = $data ?? [];
+
+// AGGRESSIVE ISOLATION: Extract heading with multiple validation layers
+$rawHeading = $blockData['heading'] ?? null;
+$blockHeading = '';
+if ($rawHeading !== null && is_string($rawHeading)) {
+    $trimmedHeading = trim($rawHeading);
+    if (!empty($trimmedHeading) && strlen($trimmedHeading) > 0) {
+        $blockHeading = $trimmedHeading;
+    }
+}
+
+$percentage = (int) ($blockData['override_percentage'] ?? 25);
+$template = $blockData['display_mode'] ?? ($blockData['template'] ?? ''); // prefer display_mode, fallback to legacy template
+
+// ENHANCED DEBUG: Log template variable state for cross-block contamination debugging
+$mediaId = $blockData['media_id'] ?? 'unknown';
+error_log("TEMPLATE_DEBUG: Block for media #{$mediaId} - blockHeading: '{$blockHeading}', raw heading: '" . ($rawHeading ?? 'NULL') . "'");
+error_log("TEMPLATE_DEBUG: Block data keys: " . implode(', ', array_keys($blockData)));
+error_log("TEMPLATE_DEBUG: Display template selected: '" . ($template ?: 'default') . "' for media #{$mediaId}");
+error_log("TEMPLATE_DEBUG: Template behavior - " . ($template === 'grid' ? 'Side-by-side grid layout (300px inline-block)' : ($template === 'list' ? 'Full-width layout with preserved aspect ratio' : 'Responsive flex layout')));
+error_log("GRID_DEBUG: CSS classes applied: 'video-thumbnails" . ($template ? " {$template}" : "") . "' for media #{$mediaId}");
+error_log("GRID_DEBUG: Expected CSS behavior - " . ($template === 'grid' ? 'display: inline-block should override base flex' : 'using base flex or list styles'));
+if ($template === 'grid') {
+    error_log("GRID_DEBUG: Grid template active - CSS should show: display: inline-block, width: 300px, vertical-align: top");
+    error_log("GRID_DEBUG: JavaScript fallback will activate if CSS fails to override flexbox");
+}
+
+// CONTAMINATION CHECK: Log all variables in current scope that might be contaminated
+$allVars = get_defined_vars();
+$suspiciousVars = [];
+foreach ($allVars as $varName => $varValue) {
+    if (is_string($varValue) && !empty($varValue) && strpos($varName, 'heading') !== false) {
+        $suspiciousVars[$varName] = $varValue;
+    }
+}
+if (!empty($suspiciousVars)) {
+    error_log("TEMPLATE_DEBUG: Suspicious heading variables in scope: " . json_encode($suspiciousVars));
+}
+
+// Get selected media from block data
+$mediaId = $blockData['media_id'] ?? null;
+
+if (empty($mediaId)) {
+    return '<div class="video-thumbnail-empty">' . $translate('No video media selected for this block.') . '</div>';
+}
+
+try {
+    $videoMedia = $this->api()->read('media', $mediaId)->getContent();
+} catch (\Exception $e) {
+    return '<div class="video-thumbnail-error">' . $translate('Video media not found.') . '</div>';
+}
+
+// Verify this is actually a video file
+$mediaType = $videoMedia->mediaType();
+if (!$mediaType || strpos($mediaType, 'video/') !== 0) {
+    return '<div class="video-thumbnail-error">' . $translate('Selected media is not a video file.') . '</div>';
+}
+?>
+
+<!-- GRID_DEBUG: Template='<?= $escape($template ?: 'default') ?>', Expected CSS class='video-thumbnails<?= $template ? " {$escape($template)}" : "" ?>' -->
+<div id="video-thumbnail-<?= $block->id(); ?>" class="video-thumbnails <?= $escape($template) ?>" data-template="<?= $escape($template ?: 'default') ?>" data-media-id="<?= $videoMedia->id() ?>" data-layout-scope="derivative-media"><?php
+// GRID_DEBUG: Add inline style for grid debugging
+if ($template === 'grid') {
+    echo "\n<!-- GRID_DEBUG: This block should be inline-block with 300px width -->";
+}
+?>
+    <div class="video-thumbnail-item" data-media-id="<?= $videoMedia->id() ?>">
+        <div class="video-thumbnail-image">
+            <?php
+            // FIXED: Use proper route generation instead of manual URL construction
+            $siteSlug = $site ? $site->slug() : null;
+
+            if ($siteSlug) {
+                // Use proper route helper for video player
+                try {
+                    $playerUrl = $this->url('derivative-video-player', [
+                        'site-slug' => $siteSlug,
+                        'media-id' => $videoMedia->id()
+                    ]);
+                } catch (\Exception $e) {
+                    // Fallback to media page if route fails
+                    $playerUrl = $this->url('site/resource-id', [
+                        'site-slug' => $siteSlug,
+                        'controller' => 'media',
+                        'id' => $videoMedia->id()
+                    ]);
+                }
+            } else {
+                // Fallback to direct media URL if no site
+                $playerUrl = $videoMedia->url();
+            }
+            ?>
+
+            <?php if ($videoMedia->hasThumbnails()): ?>
+                <!-- SECURITY FIX: Add rel="noopener" to prevent window.opener access -->
+                <a href="<?= $escape($playerUrl) ?>" target="_blank" rel="noopener" class="video-thumbnail-link">
+                    <div class="thumbnail-container">
+                        <?php
+                        // ENVIRONMENT-AWARE URL CONSTRUCTION: Use CustomServerUrl helper when available
+                        $thumbnailPath = $videoMedia->thumbnailUrl('medium');
+
+                        // Check if CustomServerUrl helper is available and use it for proper URL generation
+                        if ($this->getHelperPluginManager()->has('customServerUrl')) {
+                            // Use our CustomServerUrl helper for environment-aware URL generation
+                            $customServerUrl = $this->customServerUrl();
+
+                            // If thumbnailUrl returns malformed URL, construct it properly using CustomServerUrl
+                            if (strpos($thumbnailPath, 'http:///') === 0) {
+                                // Extract just the file path part
+                                $filePath = str_replace('http:///', '', $thumbnailPath);
+                                $thumbnailUrl = rtrim($customServerUrl, '/') . '/' . ltrim($filePath, '/');
+                            } else {
+                                $thumbnailUrl = $thumbnailPath;
+                            }
+                        } else {
+                            // Fallback: Dynamic base URL retrieval from application configuration
+                            $serviceLocator = $this->getHelperPluginManager()->getServiceLocator();
+
+                            // Try multiple sources for base URL in order of preference
+                            $baseUrl = null;
+
+                            // 1. Try application configuration
+                            try {
+                                $config = $serviceLocator->get('Config');
+                                $baseUrl = $config['base_url'] ?? null;
+                            } catch (\Exception $e) {
+                                // Config not available, continue to next method
+                            }
+
+                            // 2. Try Omeka settings
+                            if (!$baseUrl) {
+                                try {
+                                    $settings = $serviceLocator->get('Omeka\Settings');
+                                    $baseUrl = $settings->get('base_url');
+                                } catch (\Exception $e) {
+                                    // Settings not available, continue to next method
+                                }
+                            }
+
+                            // 3. Try to construct from current request
+                            if (!$baseUrl) {
+                                try {
+                                    $request = $serviceLocator->get('Request');
+                                    $uri = $request->getUri();
+                                    $baseUrl = $uri->getScheme() . '://' . $uri->getHost();
+                                    if ($uri->getPort() && !in_array($uri->getPort(), [80, 443])) {
+                                        $baseUrl .= ':' . $uri->getPort();
+                                    }
+                                    // Add base path if available
+                                    $basePath = $serviceLocator->get('ViewHelperManager')->get('BasePath');
+                                    if ($basePath && method_exists($basePath, '__invoke')) {
+                                        $baseUrl .= $basePath();
+                                    }
+                                } catch (\Exception $e) {
+                                    // Request not available, use final fallback
+                                    $baseUrl = '';
+                                }
+                            }
+
+                            // If thumbnailUrl returns malformed URL, construct it properly
+                            if (strpos($thumbnailPath, 'http:///') === 0) {
+                                // Extract just the file path part
+                                $filePath = str_replace('http:///', '', $thumbnailPath);
+                                if ($baseUrl) {
+                                    $thumbnailUrl = rtrim($baseUrl, '/') . '/' . ltrim($filePath, '/');
+                                } else {
+                                    // Last resort: use relative URL
+                                    $thumbnailUrl = '/' . ltrim($filePath, '/');
+                                }
+                            } else {
+                                $thumbnailUrl = $thumbnailPath;
+                            }
+                        }
+                        // CACHE-BUSTING: Append file modification time of thumbnail to URL
+                        try {
+                            $storageId = method_exists($videoMedia, 'storageId') ? $videoMedia->storageId() : $videoMedia->id();
+                            if (is_string($storageId) && $storageId !== '') {
+                                // Sanitize storage ID similarly to service
+                                $sanitizedStorageId = preg_replace('/[^a-zA-Z0-9_\-\/.]/', '_', $storageId);
+                                $mediumPath = OMEKA_PATH . '/files/medium/' . $sanitizedStorageId . '.jpg';
+                                if (file_exists($mediumPath)) {
+                                    $version = filemtime($mediumPath) ?: time();
+                                    $thumbnailUrl .= (strpos($thumbnailUrl, '?') === false ? '?' : '&') . 'v=' . $version;
+                                }
+                            }
+                        } catch (\Throwable $e) {
+                            error_log('TEMPLATE_DEBUG: Cache-busting computation failed: ' . $e->getMessage());
+                        }
+                        ?>
+
+                        <img src="<?= $escape($thumbnailUrl) ?>"
+                             alt="<?= $escape($videoMedia->displayTitle()) ?>"
+                             loading="lazy">
+                        <div class="play-overlay">
+                            <div class="play-button">▶</div>
+                        </div>
+                    </div>
+                </a>
+            <?php else: ?>
+                <a href="<?= $escape($playerUrl) ?>" target="_blank" class="video-thumbnail-link">
+                    <div class="video-placeholder">
+                        <span class="video-icon">🎬</span>
+                        <div class="play-overlay">
+                            <div class="play-button">▶</div>
+                        </div>
+                    </div>
+                </a>
+            <?php endif; ?>
+        </div>
+        <div class="video-thumbnail-info">
+            <?php
+            // ENHANCEMENT: Use block-specific heading as caption if provided, otherwise use file name
+            $caption = !empty($blockHeading) ? $blockHeading : $videoMedia->displayTitle();
+
+            // ENHANCED DEBUG: Log caption choice and check for contamination
+            error_log("CAPTION_DEBUG: Media #{$videoMedia->id()} - Using caption: '{$caption}' (source: " . (!empty($blockHeading) ? 'custom heading' : 'file name') . ")");
+            error_log("CAPTION_DEBUG: blockHeading value: '{$blockHeading}', displayTitle: '{$videoMedia->displayTitle()}'");
+            ?>
+            <h4><?= $escape($caption) ?></h4>
+            <?php if ($videoMedia->value('dcterms:description')): ?>
+                <p class="video-description"><?= $escape($videoMedia->value('dcterms:description')) ?></p>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<?php
+// VARIABLE CLEANUP: Prevent contamination of subsequent blocks
+unset($blockData, $blockHeading, $caption, $rawHeading, $mediaId, $allVars, $suspiciousVars);
+error_log("TEMPLATE_DEBUG: Variables cleaned up for media #{$videoMedia->id()}");
+?>
+
+<style>
+/* BASE STYLES - Default responsive layout */
+.video-thumbnails {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+/* IMPORTANT: Exclude grid template from base flex styles */
+.video-thumbnails:not(.grid) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.video-thumbnail-item {
+    flex: 1;
+    min-width: 300px;
+    max-width: 400px;
+}
+
+/* IMPORTANT: Exclude grid template items from base flex styles */
+.video-thumbnails:not(.grid) .video-thumbnail-item {
+    flex: 1;
+    min-width: 300px;
+    max-width: 400px;
+}
+
+/* GRID TEMPLATE - Complete override of base styles */
+/* Ultra-high specificity and complete flexbox elimination */
+body div.video-thumbnails.grid[data-template="grid"],
+html body div.video-thumbnails.grid[data-template="grid"] {
+    /* Completely override flexbox */
+    display: inline-block !important;
+    flex: none !important;
+    flex-direction: unset !important;
+    flex-wrap: unset !important;
+    align-items: unset !important;
+    justify-content: unset !important;
+
+    /* Set grid-specific properties */
+    width: 300px !important;
+    height: auto !important;
+    margin: 1rem 0.5rem 1rem 0 !important;
+    padding: 0 !important;
+    vertical-align: top !important;
+    gap: 0 !important;
+
+    /* Ensure no float interference */
+    float: none !important;
+    clear: none !important;
+
+    /* Reset any positioning */
+    position: relative !important;
+}
+
+/* CORRECTED: Target INNER items (.video-thumbnail-item) - should fill container */
+[data-template="grid"] .video-thumbnail-item,
+.video-thumbnails.grid .video-thumbnail-item,
+div[data-template="grid"] .video-thumbnail-item,
+div.video-thumbnails.grid .video-thumbnail-item,
+body div.video-thumbnails.grid .video-thumbnail-item,
+html body div.video-thumbnails.grid .video-thumbnail-item {
+    /* Override any flex item properties */
+    flex: none !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    flex-basis: auto !important;
+
+    /* CORRECTED: Inner items should fill the 300px container */
+    display: block !important;
+    width: 100% !important;  /* Fill the 300px container */
+    max-width: 100% !important;
+    min-width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* Grid template: Square thumbnails */
+div.video-thumbnails.grid .thumbnail-container,
+div.video-thumbnails.grid .video-placeholder {
+    height: 200px !important;
+    width: 100% !important;
+    aspect-ratio: 1 / 1;
+}
+
+/* THEME-COMPATIBLE GRID OVERRIDE - Maximum specificity without breaking theme */
+/* Target grid containers with ultra-high specificity to override theme CSS */
+html body.omeka-s div.site-page-content div.video-thumbnails.grid,
+html body div.site-page-content div.video-thumbnails.grid,
+html body div.video-thumbnails.grid[data-template="grid"],
+html body.omeka-s div.video-thumbnails.grid,
+html body div.video-thumbnails.grid,
+body.omeka-s div.video-thumbnails.grid,
+div.video-thumbnails.grid[data-template="grid"],
+.site-page-content .video-thumbnails.grid,
+.video-thumbnails.grid[data-template="grid"] {
+    display: inline-block !important;
+    width: 300px !important;
+    max-width: 300px !important;
+    min-width: 300px !important;
+    margin: 1rem 0.5rem 1rem 0 !important;
+    vertical-align: top !important;
+
+    /* THEME COMPATIBILITY: Override flexbox properties without breaking theme */
+    flex: none !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    flex-basis: auto !important;
+
+    /* THEME COMPATIBILITY: Reset positioning without affecting theme layout */
+    float: none !important;
+    clear: none !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+
+    /* THEME COMPATIBILITY: Ensure proper spacing within theme structure */
+    overflow: visible !important;
+    z-index: auto !important;
+}
+
+
+/* LIST TEMPLATE - Vertical list-style layout for single video */
+.video-thumbnails.list {
+    display: inline-block;
+    width: auto;
+    margin: 1rem 0;
+    vertical-align: top;
+}
+
+.video-thumbnails.list .video-thumbnail-item {
+    display: block;
+    width: 400px; /* keep list container at image width */
+    max-width: 100%;
+}
+
+.video-thumbnails.list .video-thumbnail-image,
+.video-thumbnails.list .thumbnail-container {
+    width: 100%;
+    margin-bottom: 0.5rem;
+}
+
+/* List template: Adjust container height for better video aspect ratio */
+.video-thumbnails.list .thumbnail-container,
+.video-thumbnails.list .video-placeholder {
+    height: 300px;
+}
+
+.video-thumbnails.list .video-thumbnail-info {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* RESPONSIVE ADJUSTMENTS */
+@media (max-width: 768px) {
+    /* Grid template becomes full width on mobile */
+    .video-thumbnails.grid {
+        display: block;
+        width: 100%;
+        margin: 1rem 0;
+    }
+
+    .video-thumbnails.grid .video-thumbnail-item {
+        width: 100%;
+        max-width: 100%;
+        min-width: auto;
+    }
+
+    /* List template remains full width on mobile */
+    .video-thumbnails.list .video-thumbnail-item {
+        max-width: 100%;
+    }
+
+    /* List template: Reduce height on mobile */
+    .video-thumbnails.list .thumbnail-container,
+    .video-thumbnails.list .video-placeholder {
+        height: 200px;
+    }
+
+    /* Default layout adjusts item sizing */
+    .video-thumbnails .video-thumbnail-item {
+        min-width: 250px;
+    }
+}
+
+
+/* Block background should follow theme accent color */
+.video-thumbnails .video-thumbnail-item {
+    background-color: var(--site-accent-color, var(--accent-color, var(--link-color, #f8f9fa)));
+    border-radius: 8px;
+}
+
+.video-thumbnail-image {
+    position: relative;
+    margin-bottom: 0.5rem;
+}
+
+.thumbnail-container,
+.video-placeholder {
+    position: relative;
+    width: 100%;
+    height: 200px;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #f0f0f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Default and Grid: Use cover to fill container */
+.thumbnail-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* List template: Use contain to show full frame without cropping */
+.video-thumbnails.list .thumbnail-container img {
+    object-fit: contain;
+    background: #000;
+}
+
+.video-placeholder {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 3rem;
+}
+
+.play-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.video-thumbnail-link:hover .play-overlay {
+    opacity: 1;
+}
+
+.play-button {
+    width: 60px;
+    height: 60px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: #333;
+    transition: transform 0.2s ease;
+}
+
+.play-button:hover {
+    transform: scale(1.1);
+}
+
+.video-thumbnail-info h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    line-height: 1.3;
+}
+
+.video-description {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #666;
+    line-height: 1.4;
+}
+
+.video-thumbnail-empty,
+.video-thumbnail-error {
+    padding: 2rem;
+    text-align: center;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    color: #6c757d;
+}
+</style>
+
+<?php if (($template ?? '') === 'grid') : ?>
+<script>
+// AGGRESSIVE GRID LAYOUT FIX - Force grid layout regardless of CSS conflicts
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('GRID_DEBUG: Aggressive JavaScript fix loading...');
+
+    // Wait a bit for page to fully load
+    setTimeout(function() {
+        // SCOPE: Operate only on THIS block instance to avoid affecting other blocks
+        const blockEl = document.getElementById('video-thumbnail-<?= $block->id(); ?>');
+        if (!blockEl) {
+            console.log('GRID_DEBUG: Block element not found for current instance');
+            return;
+        }
+
+        const isGrid = blockEl.classList.contains('grid') && blockEl.getAttribute('data-template') === 'grid';
+        console.log('GRID_DEBUG: This block (id=video-thumbnail-<?= $block->id(); ?>) template=' + (blockEl.getAttribute('data-template') || 'default') + ', isGrid=' + isGrid);
+
+        if (!isGrid) {
+            console.log('GRID_DEBUG: Skipping non-grid block to preserve list/default layouts');
+            return;
+        }
+
+        // Apply grid layout only to this block
+        applyGridLayout(blockEl, 1);
+
+    }, 500); // Wait 500ms for page to fully load
+
+    function applyGridLayout(block, blockNumber) {
+        console.log('GRID_DEBUG: Applying THEME-COMPATIBLE grid layout to block ' + blockNumber);
+
+        // Get current computed style of the OUTER container
+        const computedStyle = window.getComputedStyle(block);
+        const currentDisplay = computedStyle.display;
+        const currentWidth = computedStyle.width;
+        console.log('GRID_DEBUG: Block ' + blockNumber + ' current display: ' + currentDisplay + ', width: ' + currentWidth);
+
+        // THEME-COMPATIBLE: Force grid layout without breaking theme functionality
+        block.style.setProperty('display', 'inline-block', 'important');
+        block.style.setProperty('width', '300px', 'important');
+        block.style.setProperty('max-width', '300px', 'important');
+        block.style.setProperty('min-width', '300px', 'important');
+        block.style.setProperty('margin', '1rem 0.5rem 1rem 0', 'important');
+        block.style.setProperty('vertical-align', 'top', 'important');
+
+        // THEME-COMPATIBLE: Override flexbox properties safely
+        block.style.setProperty('flex', 'none', 'important');
+        block.style.setProperty('flex-grow', '0', 'important');
+        block.style.setProperty('flex-shrink', '0', 'important');
+        block.style.setProperty('flex-basis', 'auto', 'important');
+
+        // THEME-COMPATIBLE: Reset positioning without affecting theme
+        block.style.setProperty('float', 'none', 'important');
+        block.style.setProperty('clear', 'none', 'important');
+        block.style.setProperty('position', 'relative', 'important');
+        block.style.setProperty('box-sizing', 'border-box', 'important');
+
+        // THEME-COMPATIBLE: Ensure proper spacing within theme structure
+        block.style.setProperty('overflow', 'visible', 'important');
+        block.style.setProperty('z-index', 'auto', 'important');
+
+        // Ensure inner items fill the container properly
+        const innerItems = block.querySelectorAll('.video-thumbnail-item');
+        innerItems.forEach(function(item, itemIndex) {
+            console.log('GRID_DEBUG: Setting inner item ' + (itemIndex + 1) + ' to fill 300px container');
+            item.style.setProperty('width', '100%', 'important');
+            item.style.setProperty('max-width', '100%', 'important');
+            item.style.setProperty('display', 'block', 'important');
+            item.style.setProperty('box-sizing', 'border-box', 'important');
+        });
+
+        // NEW: Also adjust the Omeka block wrapper so multiple blocks can sit side-by-side
+        // This is necessary because the theme may stack .block elements vertically by default
+        try {
+            const wrapper = block.closest('.block') || block.parentElement;
+            if (wrapper) {
+                const wcs = window.getComputedStyle(wrapper);
+                console.log('WRAPPER_DEBUG: Before - display=' + wcs.display + ', width=' + wcs.width + ', class=' + wrapper.className);
+                wrapper.style.setProperty('display', 'inline-block', 'important');
+                wrapper.style.setProperty('width', 'auto', 'important');
+                wrapper.style.setProperty('max-width', 'none', 'important');
+                wrapper.style.setProperty('min-width', 'auto', 'important');
+                wrapper.style.setProperty('margin', '0', 'important');
+                wrapper.style.setProperty('padding', '0', 'important');
+                wrapper.style.setProperty('vertical-align', 'top', 'important');
+                // Let the child set precise width (300px); wrapper auto adjusts
+                const wcsAfter = window.getComputedStyle(wrapper);
+                console.log('WRAPPER_DEBUG: After - display=' + wcsAfter.display + ', width=' + wcsAfter.width + ', class=' + wrapper.className);
+            } else {
+                console.log('WRAPPER_DEBUG: No wrapper found for this block');
+            }
+        } catch (e) {
+            console.log('WRAPPER_DEBUG: Exception adjusting wrapper: ' + e.message);
+        }
+
+        // Remove any legacy debug labels/classes if present
+        const existingLabels = block.querySelectorAll('[data-debug-label]');
+        existingLabels.forEach(label => label.remove());
+        block.classList.remove('js-grid-forced');
+        block.removeAttribute('data-grid-forced');
+
+        console.log('GRID_DEBUG: Grid layout forced on block ' + blockNumber);
+
+        // Verify the changes
+        setTimeout(function() {
+            const newStyle = window.getComputedStyle(block);
+            console.log('GRID_DEBUG: Block ' + blockNumber + ' final display: ' + newStyle.display + ', width: ' + newStyle.width);
+        }, 100);
+    }
+});
+</script>
+<?php endif; ?>
+
+<!-- THEME-COMPATIBLE ENHANCED DEBUG - SCOPED TO AVOID CONFLICTS -->
+<script>
+(function() {
+    'use strict';
+
+    // Unique scope to prevent variable conflicts between multiple blocks
+    const blockId = 'block_<?= $videoMedia->id() ?>';
+    console.log('=== ENHANCED GRID DEBUG ANALYSIS - ' + blockId + ' ===');
+
+    // 1. Check if blocks exist (scoped variables)
+    const videoBlocks = document.querySelectorAll('.video-thumbnails');
+    console.log('ENHANCED_DEBUG (' + blockId + '): Found ' + videoBlocks.length + ' total video thumbnail blocks');
+
+    videoBlocks.forEach(function(block, index) {
+        console.log('ENHANCED_DEBUG (' + blockId + '): Block ' + (index + 1) + ':');
+        console.log('  - Classes: ' + block.className);
+        console.log('  - Data-template: ' + block.getAttribute('data-template'));
+
+        const computedStyle = window.getComputedStyle(block);
+        console.log('  - Computed display: ' + computedStyle.display);
+        console.log('  - Computed width: ' + computedStyle.width);
+        console.log('  - Computed flex: ' + computedStyle.flex);
+        console.log('  - Computed position: ' + computedStyle.position);
+        console.log('  - Computed margin: ' + computedStyle.margin);
+        console.log('  - Computed vertical-align: ' + computedStyle.verticalAlign);
+
+        // Check parent container
+        const parent = block.parentElement;
+        if (parent) {
+            const parentStyle = window.getComputedStyle(parent);
+            console.log('  - Parent display: ' + parentStyle.display);
+            console.log('  - Parent flex-direction: ' + parentStyle.flexDirection);
+            console.log('  - Parent classes: ' + parent.className);
+        }
+
+        console.log('  ---');
+    });
+
+    // 2. Check CSS rules (scoped)
+    const sheets = document.styleSheets;
+    console.log('ENHANCED_DEBUG (' + blockId + '): Found ' + sheets.length + ' stylesheets');
+
+    // 3. Check for grid-specific blocks (scoped)
+    const grids = document.querySelectorAll('.video-thumbnails.grid');
+    const dataGrids = document.querySelectorAll('[data-template="grid"]');
+    console.log('ENHANCED_DEBUG (' + blockId + '): Found ' + grids.length + ' .grid class blocks');
+    console.log('ENHANCED_DEBUG (' + blockId + '): Found ' + dataGrids.length + ' data-template="grid" blocks');
+
+    // 4. Remove any previously injected debug styles in production
+    const dbg = document.getElementById('video-thumbnail-debug-styles');
+    if (dbg) { dbg.remove(); }
+
+    // 5. Check for CSS conflicts (scoped)
+    setTimeout(function() {
+        console.log('=== CSS CONFLICT ANALYSIS - ' + blockId + ' ===');
+        grids.forEach(function(block, index) {
+            const styles = window.getComputedStyle(block);
+            console.log('CONFLICT_DEBUG (' + blockId + '): Grid block ' + (index + 1) + ':');
+            console.log('  - Final display: ' + styles.display);
+            console.log('  - Final width: ' + styles.width);
+            console.log('  - Final margin: ' + styles.margin);
+
+            // Check if our styles are being overridden
+            if (styles.display !== 'inline-block') {
+                console.log('  ❌ CONFLICT: Display should be inline-block but is: ' + styles.display);
+            }
+            if (!styles.width.includes('300px')) {
+                console.log('  ❌ CONFLICT: Width should be 300px but is: ' + styles.width);
+            }
+        });
+    }, 1000);
+
+})();
+</script>
