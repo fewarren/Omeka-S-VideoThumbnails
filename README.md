@@ -2,16 +2,16 @@ Video Thumbnail (module for Omeka S)
 ===============================================
 
 
-[Video Thumbnails] is a module for [Omeka S] that is based on the Derivative Media Optimizer module which optimizes files for the web:
+[Video Thumbnails] is a module for [Omeka S] that is based on the Derivative Media Optimizer module written by Daniel Berthereau which optimizes files for the web:
 it creates derivative files from audio and video files adapted for mobile
 or desktop, streamable, sized for slow or big connection, and cross-browser
 compatible, including Safari. Multiple derivative files can be created for each
 file. It works the same way Omeka does for images (large, medium and square
-thumbnails).
+thumbnails). For details on how this works see Daniel's original README.md file at https://gitlab.com/Daniel-KM/Omeka-S-module-DerivativeMedia/-/blob/master/README.md?ref_type=heads
 
 ## 🎬 Video Thumbnail Enhancement
 
-This enhanced version includes **advanced video thumbnail generation** capabilities that automatically create proper video thumbnails using FFmpeg, replacing Omeka S's default black (first frame) thumbnails for video files. All the code for this enhancement was created by various AI agents with none created by a human. All debugging was done by AI agents with oversight by a software engineer. Thanks are due to the army of intelligent and dedicated people who have poured their insights and lives into creating these tools.  Special thanks to the creators of Claude Code, Roo Code, CoPilot, CodeRabbit, and most especially to the folks at Agument without who's work this enahncement would never have been born.
+This enhanced version includes **advanced video thumbnail generation** capabilities that automatically create proper video thumbnails using FFmpeg, replacing Omeka S's default black (first frame) thumbnails for video files. All the code for this enhancement was created by various AI agents with none created by a human. All debugging was done by AI agents with oversight by a software engineer. Thanks are due to Daniel Berthereau for providing the great starting point and to the army of intelligent and dedicated people who have poured their insights and lives into creating these AI tools.  Special thanks to the creators of Claude Code, Roo Code, CoPilot, CodeRabbit, and most especially to the folks at Agument without who's work this enahncement would never have been born.
 
 ### Key Features
 
